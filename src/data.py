@@ -7,10 +7,10 @@ import os
 import glob
 import json
 import datetime
-
 import numpy as np
 import xarray as xr
-
+import progressbar
+from tqdm import tqdm
 
 class Dataset():
     __name__ = ['fit', 'clip_by_date']
@@ -78,6 +78,9 @@ class Dataset():
     def fit(self):
         """main process for making training/test data"""
         # get path of target et data
+
+
+        p = progressbar.ProgressBar()
         et_path = glob.glob(self.data_path+'ET/' +
                             "*{name}*nc".format(name=self.et_product))[0]
 
@@ -101,7 +104,6 @@ class Dataset():
             sr=self.s_resolution,
             begin_year=self.begin_year,
             end_year=self.end_year)
-
         if os.path.exists(PATH+file_name):
             forcing = np.load(PATH+file_name)  # (t,lat,lon,feat)
         else:
@@ -186,9 +188,10 @@ class Dataset():
             n=N, m=self.time_length-N))
 
         print('[DataML] preprocessing')
-        static = np.tile(static, (self.time_length, 1, 1, 1))
-        feat = np.concatenate([forcing, lai, static], axis=-1)
-        del forcing, lai, static
+        lai = lai[:,:,:,np.newaxis]
+        #DEBUG(@lu li):Use less memory
+        feat = np.concatenate([forcing, lai], axis=-1)
+        del forcing, lai
 
         x_train, y_train = feat[:N], et[:N]
         x_test, y_test = feat[N:], et[N:]
@@ -230,11 +233,17 @@ class Dataset():
             y_train = y_train[:, lat_idx][:, :, lon_idx]
 
         # save output
-        x_train = x_train.reshape(-1, x_train.shape[-1])
-        y_train = y_train.reshape(-1, 1)
-        x_train = np.delete(x_train, np.argwhere(np.isnan(y_train)), axis=0)
-        y_train = np.delete(y_train, np.argwhere(np.isnan(y_train)), axis=0)
-
+        nt, nlat, nlon, nfeat = x_train.shape
+        _, nlat, nlon, nf_static = static.shape
+        x_train = x_train.reshape(nt,-1, nfeat)
+        y_train = y_train.reshape(nt,-1, 1)
+        # Debug(@lu li): use less memory
+        static = static.reshape(1, -1, nf_static)
+        x_train = np.delete(x_train, np.argwhere(np.isnan(y_train)), axis=1)
+        static = np.delete(static, np.argwhere(np.isnan(y_train)), axis=1)
+        y_train = np.delete(y_train, np.argwhere(np.isnan(y_train)), axis=1)
+        static = np.tile(static, (nt, 1, 1))
+        x_train = np.concatenate([x_train, static], axis=-1)
         np.save('x_train.npy', x_train)
         np.save('y_train.npy', y_train)
         np.save('x_test.npy', x_test)
@@ -277,30 +286,31 @@ class Dataset():
     def _load_lai(self, lai_root, begin_year, end_year, t_resolution, s_resolution):
         lai_all = []
         fold = "{tr}_{sr}/".format(tr=t_resolution, sr=s_resolution)
-        with xr.open_dataset(lai_root+fold+'LAI_{}_{}.nc'.format(
+        with xr.open_dataset(lai_root+fold+'LAI_{tr}_{sr}.nc'.format(
                 tr=t_resolution, sr=s_resolution)) as f:
-            lai = np.array(f.LAI)
+            lai = np.array(f.lai)
 
-        for year in range(begin_year, end_year):
+        for year in range(begin_year, end_year+1):
             if (year % 4 == 0) & (year % 100 != 0):
                 lai_all.append(lai)
             else:
                 idx = np.delete(np.arange(366), 59, axis=0)  # remove 2.29
                 lai_all.append(lai[idx])
         lai = np.concatenate(lai_all, axis=0)
+        lai = lai[:,:,:,np.newaxis]
         return lai
 
     def _load_ancillary(self, ancillary_root, s_resolution):
         ancillary_root = ancillary_root + '/' + s_resolution + '/'
-        with xr.open_dataset(ancillary_root+'Beck_KG_V1_present_{}.nc'.format(s_resolution)) as f:
+        with xr.open_dataset(ancillary_root+'Beck_KG_V1_present_{s_resolution}.nc'.format(s_resolution)) as f:
             climate_zone = np.array(f.climate_zone)
-        with xr.open_dataset(ancillary_root+'DEM_{}.nc'.format(s_resolution)) as f:
+        with xr.open_dataset(ancillary_root+'DEM_{s_resolution}.nc'.format(s_resolution)) as f:
             dem = np.array(f.dem)
-        with xr.open_dataset(ancillary_root+'kosugi_{}.nc'.format(s_resolution)) as f:
+        with xr.open_dataset(ancillary_root+'kosugi_{s_resolution}.nc'.format(s_resolution)) as f:
             kosugi = np.array(f.kosugi)
-        with xr.open_dataset(ancillary_root+'LC_{}.nc'.format(s_resolution)) as f:
+        with xr.open_dataset(ancillary_root+'LC_{s_resolution}.nc'.format(s_resolution)) as f:
             land_cover = np.array(f.land_cover)
-        with xr.open_dataset(ancillary_root+'soilgrid_{}.nc'.format(s_resolution)) as f:
+        with xr.open_dataset(ancillary_root+'soilgrid_{s_resolution}.nc'.format(s_resolution)) as f:
             soilgrid = np.array(f.soilgrids)
 
         tmp = np.stack([climate_zone, dem, land_cover, soilgrid[0], soilgrid[1],
