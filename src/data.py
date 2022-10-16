@@ -12,6 +12,7 @@ import xarray as xr
 import progressbar
 from tqdm import tqdm
 
+
 class Dataset():
     __name__ = ['fit', 'clip_by_date']
 
@@ -79,7 +80,6 @@ class Dataset():
         """main process for making training/test data"""
         # get path of target et data
 
-
         p = progressbar.ProgressBar()
         et_path = glob.glob(self.data_path+'ET/' +
                             "*{name}*nc".format(name=self.et_product))[0]
@@ -104,6 +104,7 @@ class Dataset():
             sr=self.s_resolution,
             begin_year=self.begin_year,
             end_year=self.end_year)
+
         if os.path.exists(PATH+file_name):
             forcing = np.load(PATH+file_name)  # (t,lat,lon,feat)
         else:
@@ -188,7 +189,7 @@ class Dataset():
             n=N, m=self.time_length-N))
 
         print('[DataML] preprocessing')
-        lai = lai[:,:,:,np.newaxis]
+
         #DEBUG(@lu li):Use less memory
         feat = np.concatenate([forcing, lai], axis=-1)
         del forcing, lai
@@ -286,11 +287,13 @@ class Dataset():
     def _load_lai(self, lai_root, begin_year, end_year, t_resolution, s_resolution):
         lai_all = []
         fold = "{tr}_{sr}/".format(tr=t_resolution, sr=s_resolution)
+
         with xr.open_dataset(lai_root+fold+'LAI_{tr}_{sr}.nc'.format(
                 tr=t_resolution, sr=s_resolution)) as f:
             lai = np.array(f.lai)
 
         for year in range(begin_year, end_year+1):
+
             if (year % 4 == 0) & (year % 100 != 0):
                 lai_all.append(lai)
             else:
