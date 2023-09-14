@@ -279,6 +279,58 @@ def test_data_ensmean(case_name, model_name):
                               'data': np.concatenate([r2.reshape(-1), rmse.reshape(-1), kge.reshape(-1)], axis=0)})  # 'R': R,'KGE': KGE,
     test_data.to_excel(f"/tera07/zhwei/For_QingChen/DataML/plot/xlsx/{case_name}_{model_name}_test_ens.xlsx", sheet_name='test', index=True)
 
+def ET_product(cfg):
+    case_name = cfg['case_name']
+    model_name = cfg['model_name']
+    test_set = cfg['testset']
+    stnlist = f"/tera07/zhwei/For_QingChen/DataML/plot/xlsx/{case_name}_{model_name}.xlsx"
+    station_list = pd.read_excel(stnlist, header=0, sheet_name=f'{test_set}')  # ,header=0
+
+    r2 = np.full((11, len(station_list['i'])), np.nan)
+    mse = np.full((11, len(station_list['i'])), np.nan)
+    rmse = np.full((11, len(station_list['i'])), np.nan)
+    kge = np.full((11, len(station_list['i'])), np.nan)
+    Climate_zone = []
+    models = ['GLEAM_v3.6a', 'GLEAM_v3.6b', 'GLEAM_hybrid', 'REA', 'GLDAS_CLSM-2.2', 'GLDAS_Noah-2.1', 'ERA5', 'ET_3T', 'EB_ET', 'FLUXCOM_9km',
+              'PMLV2']
+    pbar = tqdm(range(len(station_list['filename'])), ncols=140)
+    for i in pbar:
+        pbar.set_description("Now loacation at %s" % (station_list['filename'][i]))
+        indata = f"/tera07/zhwei/For_QingChen/DataML/FLUXNET/input/{case_name}/model/{test_set}/{station_list['filename'][i]}.npy"
+        ET = np.load(indata)[:, -1]
+        os.chdir("/tera07/zhwei/For_QingChen/DataML/FLUXNET/input/ET/")
+        for j, model in enumerate(models):
+            filename = glob.glob(f"./{model}/{station_list['filename'][i]}*.nc", recursive=True)
+            # print(filename)
+            data = np.array(xr.open_dataset(filename[0]).ET)
+            obs = np.array(ET)
+            if np.count_nonzero(~np.isnan(data)) < len(data):
+                obs = np.delete(np.array(obs), np.argwhere(np.isnan(data)), axis=0)
+                data = np.delete(np.array(data), np.argwhere(np.isnan(data)), axis=0)
+            if np.count_nonzero(~np.isnan(obs)) < len(obs):
+                data = np.delete(np.array(data), np.argwhere(np.isnan(obs)), axis=0)
+                obs = np.delete(np.array(obs), np.argwhere(np.isnan(obs)), axis=0)
+
+            if len(obs) == 0:
+                r2[j, i] = np.nan
+                mse[j, i] = np.nan
+                rmse[j, i] = np.nan
+                kge[j, i] = np.nan
+            else:
+                r2[j, i] = R2_score(obs, data)
+                mse[j, i] = mse_score(obs, data)
+                rmse[j, i] = rmse_score(obs, data)
+                kge[j, i] = kge_score(obs, data)
+
+        Climate_zone.append(station_list['Climate_zone'][i])
+
+    et_data = pd.DataFrame({'filename': np.tile(station_list['filename'], len(models) * 4),
+                          'models': np.tile(np.array(models).repeat(len(station_list['filename'])), 4),
+                          'Metric': np.array(['R2', 'MSE','RMSE', 'KGE']).repeat(len(station_list['filename']) * len(models)),
+                          'Climate_zone': np.tile(Climate_zone, len(models) * 4),
+                          'data': np.concatenate([r2.reshape(-1), mse.reshape(-1),rmse.reshape(-1), kge.reshape(-1)], axis=0)})  # 'R': R,'KGE': KGE,
+    et_data.to_excel(f"/tera07/zhwei/For_QingChen/DataML/plot/xlsx/{case_name}_{model_name}_ET_{test_set}.xlsx", sheet_name=f'{test_set}', index=True)
+
 def site_data_ML(cfg):
     case_name = cfg['case_name']
     model_name = cfg['model_name']
@@ -331,7 +383,7 @@ def time_data_ML(cfg):
     model_name = cfg['model_name']
     test_set = cfg['testset']
     stnlist = f"/tera07/zhwei/For_QingChen/DataML/plot/xlsx/{case_name}_{model_name}.xlsx"
-    station_list = pd.read_excel(stnlist, header=0, sheet_name=f'train_test')  # ,header=0
+    station_list = pd.read_excel(stnlist, header=0, sheet_name=f'time_test')  # ,header=0
 
     r2 = np.full((4, len(station_list['i'])), np.nan)
     mse = np.full((4, len(station_list['i'])), np.nan)
@@ -375,6 +427,9 @@ def call_fun_by_str(cfg):
             eval('site_data_ML')(cfg)
         if cfg['test_case'] == 'time test':
             eval('time_data_ML')(cfg)
+        if cfg['test_case'] == 'ET product':
+            eval('ET_product')(cfg)
+
 
 if __name__ == "__main__":
     cfg = get_args()
